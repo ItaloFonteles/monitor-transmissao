@@ -6,6 +6,7 @@ PROBLEMAS = {
     "sem_video": ("⬛", "sem imagem"),
     "congelada": ("🧊", "imagem congelada"),
     "sem_audio": ("🔇", "sem áudio"),
+    "silencio": ("🤫", "silêncio prolongado"),
     "audio_alto": ("📢", "áudio estourando (volume muito alto)"),
     "sem_verificacao": ("⚠️", "não consigo verificar a transmissão"),
 }

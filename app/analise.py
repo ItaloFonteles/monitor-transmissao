@@ -6,6 +6,10 @@ import subprocess
 
 # Um problema conta quando ocupa pelo menos esta fração da amostra (ex.: 6 de 10 s).
 FRACAO = 0.6
+# Silêncio é mais exigente: numa sessão há pausas normais (votação, troca de orador).
+FRACAO_SILENCIO = 0.8
+# Abaixo disso não há sinal nenhum: o encoder perdeu o som (mudo de verdade).
+PICO_MUDO_DB = -70
 
 CENAS = {
     "ok": ("testsrc2=size=320x180:rate=10", "sine=frequency=440:sample_rate=44100"),
@@ -65,8 +69,10 @@ def interpretar(saida, segundos, volume_alto_db=-8):
         problemas.append("preta")
     elif congelada >= FRACAO * segundos:
         problemas.append("congelada")
-    if not tem_audio or silencio >= FRACAO * segundos or volume is None or volume <= -60:
-        problemas.append("sem_audio")
+    if not tem_audio or pico is None or pico <= PICO_MUDO_DB:
+        problemas.append("sem_audio")     # mudo: avisa rápido
+    elif silencio >= FRACAO_SILENCIO * segundos:
+        problemas.append("silencio")      # há sinal, mas baixo: só avisa se durar (minutos_silencio)
     elif volume >= volume_alto_db:
         problemas.append("audio_alto")
 

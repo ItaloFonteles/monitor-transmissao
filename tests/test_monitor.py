@@ -77,11 +77,24 @@ class TestAnalise(unittest.TestCase):
         self.assertEqual(r["congelada"], 7.5)
         self.assertEqual(r["problemas"], ["congelada"])
 
-    def test_silencio_e_sem_audio(self):
-        saida = SAIDA_NORMAL + "[silencedetect @ 0x4] silence_start: 0\n"
-        self.assertEqual(analise.interpretar(saida, 10)["problemas"], ["sem_audio"])
+    def test_mudo_e_sem_audio(self):
+        mudo = (SAIDA_NORMAL.replace("mean_volume: -22.4", "mean_volume: -91.0")
+                .replace("max_volume: -3.1", "max_volume: -91.0") + "[silencedetect @ 0x4] silence_start: 0\n")
+        self.assertEqual(analise.interpretar(mudo, 10)["problemas"], ["sem_audio"])
+        zerado = SAIDA_NORMAL.replace("max_volume: -3.1 dB", "max_volume: -inf dB")
+        self.assertEqual(analise.interpretar(zerado, 10)["problemas"], ["sem_audio"])
         sem_trilha = SAIDA_NORMAL.replace("  Stream #0:1: Audio: aac, 44100 Hz, stereo\n", "")
         self.assertIn("sem_audio", analise.interpretar(sem_trilha, 10)["problemas"])
+
+    def test_silencio_com_sinal_nao_e_mudo(self):
+        """Caso real (live de campeonato): narradores calados, pico -50,8 dB. É pausa, não microfone mudo."""
+        pausa = (SAIDA_NORMAL.replace("mean_volume: -22.4", "mean_volume: -62.2")
+                 .replace("max_volume: -3.1", "max_volume: -50.8") + "[silencedetect @ 0x4] silence_start: 0\n")
+        self.assertEqual(analise.interpretar(pausa, 10)["problemas"], ["silencio"])
+        curta = SAIDA_NORMAL + "[silencedetect @ 0x4] silence_start: 1.9\n"   # 8,1 s de 10: ainda é pausa
+        self.assertEqual(analise.interpretar(curta, 10)["problemas"], ["silencio"])
+        normal = SAIDA_NORMAL + "[silencedetect @ 0x4] silence_start: 4.4\n[silencedetect @ 0x4] silence_end: 7.7\n"
+        self.assertEqual(analise.interpretar(normal, 10)["problemas"], [])
 
     def test_audio_estourando(self):
         saida = SAIDA_NORMAL.replace("mean_volume: -22.4", "mean_volume: -4.0")
@@ -103,6 +116,20 @@ class TestFfmpegDeVerdade(unittest.TestCase):
                 r = analise.analisar(f"lavfi:{cena}", segundos=6)
                 self.assertEqual(r["erro"], "")
                 self.assertEqual(r["problemas"], esperado)
+
+    def test_trilhas_separadas_com_inicio_diferente_nao_viram_silencio(self):
+        """Como no YouTube: vídeo e áudio em trilhas separadas (o áudio até começando 5 s depois)."""
+        import subprocess
+        with tempfile.TemporaryDirectory() as pasta:
+            video, audio = os.path.join(pasta, "v.ts"), os.path.join(pasta, "a.ts")
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10",
+                            "-t", "12", "-c:v", "libx264", "-preset", "ultrafast", video], check=True)
+            subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100",
+                            "-t", "12", "-c:a", "aac", "-output_ts_offset", "5", audio], check=True)
+            r = analise.analisar([video, audio], segundos=6)
+            self.assertEqual(r["erro"], "")
+            self.assertEqual(r["problemas"], [])
+            self.assertLess(r["silencio"], 1)
 
 
 class TestFonte(unittest.TestCase):
@@ -145,6 +172,15 @@ class TestEstado(unittest.TestCase):
         self.assertEqual(e.atualizar(T0 + timedelta(minutes=1), True, ["sem_audio"]), [("alerta", "sem_audio", T0)])
         self.assertEqual(e.atualizar(T0 + timedelta(minutes=2), True, ["sem_audio"]), [])  # não repete
         self.assertEqual(e.atualizar(T0 + timedelta(minutes=3), True, []), [("resolvido", "sem_audio", T0)])
+
+    def test_silencio_so_alerta_depois_de_minutos(self):
+        e = EstadoCanal(2, {"silencio": 5})
+        for minuto in range(4):
+            self.assertEqual(e.atualizar(T0 + timedelta(minutes=minuto), True, ["silencio"]), [])
+        self.assertEqual(e.atualizar(T0 + timedelta(minutes=4), True, ["silencio"]), [("alerta", "silencio", T0)])
+        e2 = EstadoCanal(2, {"silencio": 5})                       # uma fala no meio zera a contagem
+        for minuto, problemas in enumerate([["silencio"]] * 3 + [[]] + [["silencio"]] * 3):
+            self.assertEqual(e2.atualizar(T0 + timedelta(minutes=minuto), True, problemas), [])
 
     def test_soluco_nao_alerta_nem_resolve(self):
         e = EstadoCanal(2)

@@ -8,7 +8,8 @@ Vigia **transmissões ao vivo** no YouTube, no Facebook ou num servidor próprio
 | A transmissão caiu | 🔴 Câmara Municipal: transmissão fora do ar desde 10:42 |
 | Tela preta | ⬛ Câmara Municipal: tela preta desde 10:15 |
 | Imagem congelada | 🧊 Câmara Municipal: imagem congelada desde 11:03 |
-| Microfone mudo ou sem áudio | 🔇 Câmara Municipal: sem áudio desde 10:20 |
+| Sem áudio (encoder ou mesa mutada) | 🔇 Câmara Municipal: sem áudio desde 10:20 |
+| Silêncio por vários minutos | 🤫 Câmara Municipal: silêncio prolongado desde 10:31 |
 | Áudio estourando | 📢 Câmara Municipal: áudio estourando (volume muito alto) desde 09:31 |
 
 Quando o problema some, chega o aviso de **resolvido** com a duração ("✅ sem áudio resolvido às 10:23 (durou 3 min)"). No fim de cada sessão sai um **relatório**: tempo no ar, quedas, problemas e audiência, com gráfico.
@@ -16,6 +17,7 @@ Quando o problema some, chega o aviso de **resolvido** com a duração ("✅ sem
 **Para quem:** câmaras municipais, assembleias, igrejas, produtoras de eventos e escolas, ou seja, quem transmite e precisa saber de uma falha **antes** de alguém reclamar.
 
 **Stack:** Python 3.12 · ffmpeg · yt-dlp · SQLite · Docker. Não precisa de chave de API do YouTube.
+
 
 ---
 
@@ -71,10 +73,18 @@ O **ffmpeg** lê `amostra_segundos` (padrão: 10 s) da live e passa por quatro d
 |---|---|---|
 | `blackdetect` | quadros quase pretos | tela preta em ≥ 60% da amostra |
 | `freezedetect` | imagem que não muda por 2 s ou mais | congelada em ≥ 60% da amostra |
-| `silencedetect` | som abaixo de `silencio_db` (−50 dB) | silêncio em ≥ 60% da amostra, ou sem trilha de áudio |
-| `volumedetect` | volume médio e pico | volume médio acima de `volume_alto_db` (−8 dB) = áudio estourando |
+| `volumedetect` | pico do som | pico abaixo de −70 dB, ou sem trilha de áudio = **sem áudio (mudo)** |
+| `silencedetect` | som abaixo de `silencio_db` (−50 dB) | silêncio em ≥ 80% da amostra = **silêncio prolongado** (veja abaixo) |
+| `volumedetect` | volume médio | volume médio acima de `volume_alto_db` (−8 dB) = áudio estourando |
 
-A regra dos 60% evita alarme por um corte de câmera ou uma pausa na fala.
+A regra dos 60% evita alarme por um corte de câmera.
+
+**Mudo × silêncio.** Toda transmissão tem pausas: votação, troca de orador, narrador calado. Num teste com uma live real de campeonato, os narradores ficaram quietos por 3 a 10 segundos várias vezes, e numa amostra inteira o som ficou abaixo de −50 dB. Por isso são dois problemas diferentes:
+
+| | Como reconhece | Quando avisa |
+|---|---|---|
+| 🔇 **Sem áudio** | **nenhum sinal**: pico abaixo de −70 dB ou sem trilha de áudio. É o encoder que perdeu o som ou a mesa que ficou mutada. | rápido: depois de `falhas_para_alerta` verificações (1 a 2 min) |
+| 🤫 **Silêncio prolongado** | há sinal, mas baixo, em ≥ 80% da amostra. Pode ser ninguém falando ou um microfone muito baixo. | só se durar **`minutos_silencio`** (padrão: 5 min) seguidos. Uma fala no meio zera a contagem. |
 
 ### 3. Estado do canal: quando avisar
 
@@ -208,6 +218,7 @@ url = "https://www.youtube.com/@igreja/live"     # sem agenda: avisa quando entr
 | `avisar_inicio_e_fim` | true | avisar quando a transmissão entra e sai do ar |
 | `silencio_db` | −50 | abaixo disso é silêncio (suba para −45 se o ambiente for muito ruidoso) |
 | `volume_alto_db` | −8 | volume médio acima disso é "áudio estourando" |
+| `minutos_silencio` | 5 | tempo de silêncio (com sinal) antes do aviso de "silêncio prolongado" |
 
 Depois de mudar o `[geral]`, rode `docker compose restart`. Canais adicionados no `config.toml` depois que o painel já foi usado não entram sozinhos: cadastre pelo painel, ou apague o `canais.json` do volume para recomeçar pelo `config.toml`.
 
@@ -299,11 +310,11 @@ monitor-transmissao/
 docker compose run --rm --no-deps monitor python -m unittest -v
 ```
 
-30 testes cobrem:
-- a leitura do ffmpeg (tela preta, congelada, silêncio, volume, trecho sem fim, vídeo que não abre);
+34 testes cobrem:
+- a leitura do ffmpeg (tela preta, congelada, **mudo × silêncio** com o caso real da live de campeonato, volume, trecho sem fim, vídeo que não abre);
 - o **ffmpeg de verdade** sobre a live simulada;
 - a agenda e as mensagens de erro do `config.toml`;
-- a lógica de alertas (só depois de N falhas, soluço não alerta, "não consigo verificar" não apaga outros problemas, fim normal não é queda);
+- a lógica de alertas (só depois de N falhas, silêncio só depois de minutos, soluço não alerta, "não consigo verificar" não apaga outros problemas, fim normal não é queda);
 - uma **manhã de sessão simulada minuto a minuto** (atraso no início, falta de áudio, queda e relatório no fim);
 - uma live sem agenda (início, fim e relatório);
 - o relatório, o painel (próxima sessão, aviso de monitor parado) e a lista de relatórios;

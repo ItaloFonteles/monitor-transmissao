@@ -103,6 +103,17 @@ class TestMonitorComCadastro(unittest.TestCase):
             self.assertFalse(any("resolvido" in t for t in alertas.textos))
 
 
+class TestLimites(unittest.TestCase):
+    def test_minutos_de_silencio_viram_verificacoes(self):
+        cfg = carregar_toml(CONFIG)
+        monitor = Monitor(cfg, Banco(":memory:"), AlertasFalsos(), log=lambda *_: None)
+        self.assertEqual(monitor.limites(), {"silencio": 5})       # 5 min, verificação a cada 60 s
+        cfg["geral"]["intervalo_segundos"] = 30
+        self.assertEqual(monitor.limites(), {"silencio": 10})
+        cfg["geral"]["minutos_silencio"] = 0
+        self.assertEqual(monitor.limites(), {"silencio": 2})        # nunca menos que falhas_para_alerta
+
+
 class TestServidor(unittest.TestCase):
     def setUp(self):
         self.pasta = tempfile.TemporaryDirectory()

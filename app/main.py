@@ -3,6 +3,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -29,13 +30,18 @@ class Monitor:
         self.log = log
         self.estados, self.urls = {}, {}
 
+    def limites(self):
+        """Silêncio com sinal (pausa, ninguém falando) só vira alerta se durar minutos_silencio."""
+        n = self.geral["falhas_para_alerta"]
+        return {"silencio": max(n, math.ceil(self.geral["minutos_silencio"] * 60 / self.geral["intervalo_segundos"]))}
+
     def _estado(self, canal, agora):
         """Estado do canal; recomeça do zero se o canal é novo ou se o link mudou pelo painel."""
         nome = canal["nome"]
         if self.urls.get(nome) != canal["url"]:
             if nome in self.estados:
                 self.banco.fechar_abertos(nome, agora)
-            self.estados[nome] = EstadoCanal(self.geral["falhas_para_alerta"])
+            self.estados[nome] = EstadoCanal(self.geral["falhas_para_alerta"], self.limites())
             self.urls[nome] = canal["url"]
         return self.estados[nome]
 

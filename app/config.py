@@ -88,6 +88,7 @@ def carregar(caminho):
     geral.setdefault("silencio_db", -50)
     geral.setdefault("volume_alto_db", -8)
     geral.setdefault("avisar_inicio_e_fim", True)
+    geral.setdefault("minutos_silencio", 5)
 
     erros = []
     canais = []

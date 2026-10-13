@@ -9,6 +9,7 @@ tolerancia_inicio_minutos = 10   # atraso aceito no começo da sessão antes de 
 avisar_inicio_e_fim = true       # avisar quando a transmissão entra e sai do ar
 silencio_db = -50                # abaixo disso é silêncio
 volume_alto_db = -8              # volume médio acima disso é "áudio estourando"
+minutos_silencio = 5             # silêncio com sinal (pausa, ninguém falando) só avisa se durar isso
 
 # Live de mentira: cai, fica preta, muda e congela num ciclo de 8 minutos.
 # Serve para testar os alertas e para demonstrar o monitor a um cliente.

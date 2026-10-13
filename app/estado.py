@@ -6,8 +6,9 @@ apitar por um soluço de 10 segundos. Quando some, sai o aviso de "resolvido" co
 
 
 class EstadoCanal:
-    def __init__(self, falhas_para_alerta=2):
+    def __init__(self, falhas_para_alerta=2, limites=None):
         self.n = falhas_para_alerta
+        self.limites = limites or {}   # problema → verificações seguidas antes do alerta
         self.contagem = {}
         self.desde = {}
         self.alertados = set()
@@ -47,7 +48,7 @@ class EstadoCanal:
         for problema in ativos:
             self.contagem[problema] = self.contagem.get(problema, 0) + 1
             self.desde.setdefault(problema, agora)
-            if self.contagem[problema] >= self.n and problema not in self.alertados:
+            if self.contagem[problema] >= self.limites.get(problema, self.n) and problema not in self.alertados:
                 self.alertados.add(problema)
                 eventos.append(("alerta", problema, self.desde[problema]))
         for problema in list(self.contagem):
