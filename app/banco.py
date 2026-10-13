@@ -26,6 +26,10 @@ class Banco:
         self.con = sqlite3.connect(caminho, check_same_thread=False)
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
+        try:  # bancos criados antes do título da live
+            self.con.execute("ALTER TABLE verificacoes ADD COLUMN titulo TEXT")
+        except sqlite3.OperationalError:
+            pass
         self.trava = threading.Lock()  # o painel lê de outra thread
 
     def _executar(self, sql, parametros=()):
@@ -34,11 +38,12 @@ class Banco:
             self.con.commit()
             return [dict(l) for l in cursor.fetchall()]
 
-    def registrar(self, canal, quando, ao_vivo, espectadores, problemas, volume, erro):
+    def registrar(self, canal, quando, ao_vivo, espectadores, problemas, volume, erro, titulo=""):
         self._executar(
-            "INSERT INTO verificacoes VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO verificacoes (canal, quando, ao_vivo, espectadores, problemas, volume, erro, titulo)"
+            " VALUES (?,?,?,?,?,?,?,?)",
             (canal, _iso(quando), None if ao_vivo is None else int(ao_vivo), espectadores,
-             ",".join(problemas), volume, erro),
+             ",".join(problemas), volume, erro, titulo),
         )
 
     def abrir_incidente(self, canal, problema, inicio):

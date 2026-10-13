@@ -71,7 +71,8 @@ class Monitor:
                 problemas = ["fora_do_ar"]
 
         eventos = estado.atualizar(agora, r["ao_vivo"], problemas, em_agenda=bool(janela))
-        self.banco.registrar(nome, agora, r["ao_vivo"], r["espectadores"], problemas, r["volume"], r["erro"])
+        self.banco.registrar(nome, agora, r["ao_vivo"], r["espectadores"], problemas, r["volume"], r["erro"],
+                             r.get("titulo") or "")
 
         for tipo, problema, desde in eventos:
             if tipo == "alerta":
@@ -126,9 +127,14 @@ def main():
     s = cfg["segredos"]
     alertas = Alertas(s["telegram_token"], s["telegram_chat_id"], s["webhook_url"], s["modo_teste"], log)
     monitor = Monitor(cfg, banco, alertas)
+    # Incidentes que ficaram abertos quando o monitor foi desligado: o estado em memória
+    # se perdeu, então fecham agora; se o problema continuar, reabrem na próxima verificação.
+    for canal in cfg["canais"]:
+        banco.fechar_abertos(canal["nome"], datetime.now().replace(microsecond=0))
 
     porta = int(os.getenv("PORTA", "8095"))
-    threading.Thread(target=criar_servidor(cfg, banco, porta).serve_forever, daemon=True).start()
+    servidor = criar_servidor(cfg, banco, porta, pasta_relatorios=monitor.pasta)
+    threading.Thread(target=servidor.serve_forever, daemon=True).start()
     log(f"Monitor de transmissão · {len(cfg['canais'])} canal(is) · painel na porta {porta}"
         f"{' · MODO_TESTE (alertas só no log)' if s['modo_teste'] else ''}")
 

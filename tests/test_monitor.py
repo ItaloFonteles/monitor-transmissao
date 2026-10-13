@@ -8,7 +8,7 @@ from app import analise, config, fonte, relatorio
 from app.banco import Banco
 from app.estado import EstadoCanal
 from app.main import Monitor
-from app.painel import pagina_status
+from app.painel import estado, pagina_relatorios, pagina_status
 
 T0 = datetime(2026, 10, 14, 9, 0)  # uma quarta-feira
 
@@ -237,9 +237,25 @@ class TestTelas(unittest.TestCase):
         self.assertEqual(r["percentual_no_ar"], 90.0)
         self.assertEqual((r["quedas"], r["pico"]), (1, 39))
         self.assertIn("<svg", relatorio.html(cfg["geral"], "Câmara", r))
-        pagina = pagina_status(cfg, banco, T0 + timedelta(minutes=10))
-        self.assertIn("No ar, tudo certo", pagina)
-        self.assertIn("aguardando a primeira verificação", pagina)  # canal Igreja
+        agora = T0 + timedelta(minutes=10)
+        e = estado(cfg, banco, agora)
+        camara, igreja = e["canais"]
+        self.assertEqual((camara["situacao"], camara["espectadores"], camara["segundos"]), ("ok", 39, 60))
+        self.assertEqual(len(camara["linha"]), 10)                              # última hora
+        self.assertEqual(camara["incidentes"][0]["rotulo"], "transmissão fora do ar")
+        self.assertEqual(camara["proxima"], "ter 20/10 09:00")  # agenda ter e qua: depois de quarta vem terça
+        self.assertEqual(igreja["situacao"], "nunca")
+        self.assertFalse(camara["parado"])
+        self.assertTrue(estado(cfg, banco, agora + timedelta(minutes=10))["canais"][0]["parado"])
+        pagina = pagina_status(cfg, banco, agora)
+        self.assertIn("const DADOS = ", pagina)
+        self.assertNotIn("</script><", pagina.split("const DADOS")[1].split("</script>")[0])
+
+    def test_lista_de_relatorios(self):
+        with tempfile.TemporaryDirectory() as pasta:
+            self.assertIn("Nenhuma sessão encerrada", pagina_relatorios(pasta))
+            open(os.path.join(pasta, "relatorio-Câmara-2026-10-14-0900.html"), "w").close()
+            self.assertIn("/relatorios/relatorio-C%C3%A2mara-2026-10-14-0900.html", pagina_relatorios(pasta))
 
 
 if __name__ == "__main__":
