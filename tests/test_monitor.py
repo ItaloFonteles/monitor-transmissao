@@ -134,7 +134,7 @@ class TestConfig(unittest.TestCase):
             carregar_toml('[[canais]]\nnome="A"\nurl="x"\nagenda=[{dias=["segunda"], inicio="09:00", fim="10:00"}]')
         with self.assertRaisesRegex(ValueError, "precisa ser depois"):
             carregar_toml('[[canais]]\nnome="A"\nurl="x"\nagenda=[{inicio="10:00", fim="09:00"}]')
-        with self.assertRaisesRegex(ValueError, "falta 'url'"):
+        with self.assertRaisesRegex(ValueError, "falta o link"):
             carregar_toml('[[canais]]\nnome="A"')
 
 

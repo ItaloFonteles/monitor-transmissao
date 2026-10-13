@@ -9,6 +9,7 @@ from pathlib import Path
 from . import analise, fonte, relatorio
 from .alertas import Alertas
 from .banco import Banco
+from .canais import Cadastro
 from .config import carregar, janela_atual, tolerancia
 from .estado import EstadoCanal
 from .rotulos import duracao, icone, rotulo
@@ -26,7 +27,17 @@ class Monitor:
         self.consultar, self.analisar = consultar, analisar
         self.pasta = Path(pasta_relatorios)
         self.log = log
-        self.estados = {c["nome"]: EstadoCanal(self.geral["falhas_para_alerta"]) for c in cfg["canais"]}
+        self.estados, self.urls = {}, {}
+
+    def _estado(self, canal, agora):
+        """Estado do canal; recomeça do zero se o canal é novo ou se o link mudou pelo painel."""
+        nome = canal["nome"]
+        if self.urls.get(nome) != canal["url"]:
+            if nome in self.estados:
+                self.banco.fechar_abertos(nome, agora)
+            self.estados[nome] = EstadoCanal(self.geral["falhas_para_alerta"])
+            self.urls[nome] = canal["url"]
+        return self.estados[nome]
 
     # ---------- verificação ----------
     def verificar(self, canal, agora):
@@ -42,7 +53,9 @@ class Monitor:
 
     def ciclo(self, agora=None):
         agora = agora or datetime.now().replace(microsecond=0)
-        canais = self.cfg["canais"]
+        canais = list(self.cfg["canais"])  # o painel pode mudar a lista durante o ciclo
+        if not canais:
+            return
         with ThreadPoolExecutor(max_workers=min(4, len(canais))) as executor:
             resultados = list(executor.map(lambda c: self.verificar(c, agora), canais))
         for canal, r in zip(canais, resultados):
@@ -50,7 +63,7 @@ class Monitor:
 
     # ---------- decisões ----------
     def processar(self, canal, r, agora):
-        nome, estado = canal["nome"], self.estados[canal["nome"]]
+        nome, estado = canal["nome"], self._estado(canal, agora)
         janela = janela_atual(canal["agenda"], agora)
 
         if estado.janela and estado.janela != janela:  # a sessão marcada acabou
@@ -126,6 +139,7 @@ def main():
     banco = Banco(os.getenv("BANCO", "/dados/monitor.db"))
     s = cfg["segredos"]
     alertas = Alertas(s["telegram_token"], s["telegram_chat_id"], s["webhook_url"], s["modo_teste"], log)
+    cadastro = Cadastro(cfg, os.getenv("CANAIS", "/dados/canais.json"))
     monitor = Monitor(cfg, banco, alertas)
     # Incidentes que ficaram abertos quando o monitor foi desligado: o estado em memória
     # se perdeu, então fecham agora; se o problema continuar, reabrem na próxima verificação.
@@ -133,7 +147,8 @@ def main():
         banco.fechar_abertos(canal["nome"], datetime.now().replace(microsecond=0))
 
     porta = int(os.getenv("PORTA", "8095"))
-    servidor = criar_servidor(cfg, banco, porta, pasta_relatorios=monitor.pasta)
+    servidor = criar_servidor(cfg, banco, porta, pasta_relatorios=monitor.pasta, cadastro=cadastro,
+                              senha=os.getenv("PAINEL_SENHA", ""))
     threading.Thread(target=servidor.serve_forever, daemon=True).start()
     log(f"Monitor de transmissão · {len(cfg['canais'])} canal(is) · painel na porta {porta}"
         f"{' · MODO_TESTE (alertas só no log)' if s['modo_teste'] else ''}")

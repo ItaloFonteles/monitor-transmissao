@@ -155,7 +155,26 @@ O canal `url = "simulado"` é uma **live de mentira** gerada pelo ffmpeg. Num ci
 
 ## Configuração
 
-Tudo fica no `config.toml`.
+### Canais: pelo painel, sem mexer em código
+
+No painel, clique em **"+ Adicionar canal"**, ou em **"Editar"** no cartão de um canal:
+
+1. **Nome:** por exemplo "Câmara Municipal de Boa Vista".
+2. **Link da transmissão:** cole o canal do jeito que tiver, como `@camara`, `youtube.com/@camara` ou `youtube.com/@camara/videos`. O painel completa sozinho para o link **`/live`**.
+3. **Testar link:** consulta o YouTube na hora e mostra se está ao vivo, o título e quantos assistem.
+   - Se você colar o link de **um vídeo** (`watch?v=…`), que muda a cada transmissão, o painel avisa e **sugere o link `/live` do canal** dono do vídeo. É só clicar para usar.
+4. **Horários das sessões** (opcional): marque os dias e o horário. Dá para ter mais de um horário, por exemplo terça a quinta de manhã e segunda à noite.
+5. **Salvar.** O monitor passa a usar o canal **na próxima verificação, sem reiniciar**.
+
+Para trocar a live vigiada, edite o link. O estado do canal recomeça do zero, sem alertas "resolvido" falsos da live anterior. **Remover canal** apaga o canal da lista, mas o histórico e os relatórios continuam guardados.
+
+Os canais ficam em `/dados/canais.json`, dentro do volume do Docker, e continuam lá depois de reiniciar ou atualizar o monitor. Na **primeira** vez, a lista vem do `config.toml`; depois disso, quem manda é o painel.
+
+**Senha do painel:** como o painel altera os canais, defina `PAINEL_SENHA=…` no `.env`. O navegador vai pedir usuário e senha: o usuário pode ser qualquer um, a senha é essa.
+
+### Pelo `config.toml`
+
+Os ajustes gerais ficam no `config.toml`. Os canais também podem ficar nele, e servem como lista inicial:
 
 ```toml
 [geral]
@@ -190,7 +209,7 @@ url = "https://www.youtube.com/@igreja/live"     # sem agenda: avisa quando entr
 | `silencio_db` | −50 | abaixo disso é silêncio (suba para −45 se o ambiente for muito ruidoso) |
 | `volume_alto_db` | −8 | volume médio acima disso é "áudio estourando" |
 
-Depois de mudar o `config.toml`, rode `docker compose restart`.
+Depois de mudar o `[geral]`, rode `docker compose restart`. Canais adicionados no `config.toml` depois que o painel já foi usado não entram sozinhos: cadastre pelo painel, ou apague o `canais.json` do volume para recomeçar pelo `config.toml`.
 
 ---
 
@@ -223,9 +242,11 @@ Abra **http://localhost:8095**. A página se atualiza sozinha a cada 10 segundos
   - **problemas de hoje**, com horário de início e fim;
   - agenda, **próxima sessão** e links para o relatório do dia e para a live;
   - aviso em vermelho se o próprio monitor parar de verificar.
+  - **Editar**: muda o nome, o link ou os horários, ou remove o canal.
+- **"+ Adicionar canal"**, com o "Testar link" (veja [Configuração](#configuração)).
 - **Relatórios:** a lista de todas as sessões encerradas, em `/relatorios`.
 
-O painel não tem senha. Deixe a porta 8095 acessível só na rede interna, nunca exposta na internet.
+Proteja o painel com `PAINEL_SENHA` e deixe a porta 8095 acessível só na rede interna, nunca exposta direto na internet. Para acompanhar de fora, use uma VPN, como o WireGuard, ou o Tailscale.
 
 ---
 
@@ -261,13 +282,14 @@ monitor-transmissao/
 │   ├── fonte.py       # está no ar? (yt-dlp, endereço direto ou live simulada)
 │   ├── analise.py     # ffmpeg: tela preta, congelada, silêncio e volume
 │   ├── estado.py      # quando avisar e quando dizer "resolvido"
-│   ├── config.py      # leitura do config.toml e da agenda
+│   ├── config.py      # leitura do config.toml, da agenda e validação de canais
+│   ├── canais.py      # cadastro de canais pelo painel (/dados/canais.json)
 │   ├── alertas.py     # Telegram, webhook e sinal de vida
 │   ├── banco.py       # histórico em SQLite (verificações e incidentes)
 │   ├── relatorio.py   # relatório da sessão (HTML com gráfico)
 │   ├── painel.py      # painel ao vivo e lista de relatórios
 │   └── rotulos.py     # nomes e ícones dos problemas
-├── tests/test_monitor.py
+├── tests/            # test_monitor.py e test_painel.py
 ├── config.exemplo.toml
 ├── docker-compose.yml
 └── Dockerfile         # Python + ffmpeg + yt-dlp
@@ -277,14 +299,18 @@ monitor-transmissao/
 docker compose run --rm --no-deps monitor python -m unittest -v
 ```
 
-21 testes cobrem:
+30 testes cobrem:
 - a leitura do ffmpeg (tela preta, congelada, silêncio, volume, trecho sem fim, vídeo que não abre);
 - o **ffmpeg de verdade** sobre a live simulada;
 - a agenda e as mensagens de erro do `config.toml`;
 - a lógica de alertas (só depois de N falhas, soluço não alerta, "não consigo verificar" não apaga outros problemas, fim normal não é queda);
 - uma **manhã de sessão simulada minuto a minuto** (atraso no início, falta de áudio, queda e relatório no fim);
 - uma live sem agenda (início, fim e relatório);
-- o relatório, o painel (próxima sessão, aviso de monitor parado) e a lista de relatórios.
+- o relatório, o painel (próxima sessão, aviso de monitor parado) e a lista de relatórios;
+- os links do YouTube (completar com /live, reconhecer link de vídeo);
+- o cadastro pelo painel (criar, editar, renomear, remover, erros e gravação no arquivo);
+- trocar e adicionar canais **com o monitor rodando**;
+- as rotas do painel de verdade (salvar, testar link, remover, só JSON) e a senha.
 
 Também foi testado com lives reais do YouTube.
 

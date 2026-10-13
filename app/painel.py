@@ -1,6 +1,8 @@
 """Painel ao vivo: situação de cada canal, linha do tempo da última hora, audiência, volume
 e incidentes do dia. A página se atualiza sozinha (busca /api/estado a cada 10 s).
 Também serve o relatório do dia e os relatórios das sessões já encerradas."""
+import base64
+import hmac
 import json
 import re
 from datetime import datetime, timedelta
@@ -9,7 +11,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import relatorio
+from . import fonte, relatorio
+from .config import agenda_para_texto
 from .rotulos import icone, rotulo
 
 SITUACOES = {
@@ -74,6 +77,7 @@ def estado(cfg, banco, agora):
         canais.append({
             "nome": nome,
             "link": canal["url"] if canal["url"].startswith("http") else None,
+            "url": canal["url"], "agenda_texto": agenda_para_texto(canal["agenda"]),
             "situacao": chave, "tom": tom, "texto": texto,
             "problemas": [{"icone": icone(p), "rotulo": rotulo(p)} for p in problemas],
             "titulo": (ultima or {}).get("titulo") or "",
@@ -137,6 +141,24 @@ main{padding:20px;display:grid;gap:16px;grid-template-columns:repeat(auto-fill,m
 ul{margin:0;padding:0;list-style:none;display:grid;gap:3px;font-size:14px}
 .rodape{margin-top:auto;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;border-top:1px solid var(--bor);padding:10px 18px;font-size:13px;color:var(--mut)}
 .aviso{background:color-mix(in srgb,var(--erro) 12%,transparent);color:var(--erro);border-radius:10px;padding:8px 12px;font-size:14px;font-weight:600}
+button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--bor);border-radius:8px;padding:6px 12px;cursor:pointer}
+button.primario{background:var(--marca);border-color:var(--marca);color:#fff;font-weight:600}
+@media (prefers-color-scheme:dark){button.primario{color:#14120e}}
+button.link{border:0;background:none;padding:0;color:var(--marca);text-decoration:underline}
+button.perigo{color:var(--erro);border-color:color-mix(in srgb,var(--erro) 40%,var(--bor))}
+dialog{border:1px solid var(--bor);border-radius:14px;background:var(--card);color:var(--txt);padding:0;width:min(560px,calc(100vw - 24px))}
+dialog::backdrop{background:rgb(0 0 0 / .45)}
+dialog form{display:grid;gap:14px;padding:20px}dialog h2{margin:0;font-size:18px}
+dialog label.campo{display:grid;gap:4px;font-size:14px;font-weight:600}
+dialog input[type=text],dialog input[type=time]{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:8px 10px;width:100%}
+.dica{font-size:12px;font-weight:400;color:var(--mut)}
+.agenda-linha{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:var(--sutil);border-radius:10px;padding:10px}
+.dias{display:flex;flex-wrap:wrap;gap:4px}.dias label{display:inline-flex;align-items:center;gap:3px;font-size:13px;background:var(--card);border:1px solid var(--bor);border-radius:99px;padding:2px 8px;cursor:pointer}
+.agenda-linha>label{display:inline-flex;align-items:center;gap:6px;font-size:13px}.agenda-linha input[type=time]{width:auto;padding:4px 6px}
+.teste{font-size:14px;border-radius:10px;padding:8px 12px;background:var(--sutil)}.teste:empty{display:none}
+.acoes{display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap}.acoes div{display:flex;gap:8px}
+.erro-form{color:var(--erro);font-size:14px;font-weight:600}.erro-form:empty{display:none}
+.vazio{grid-column:1/-1;text-align:center;padding:48px 16px;border:2px dashed var(--bor);border-radius:14px;color:var(--mut)}
 footer{text-align:center;font-size:12px;color:var(--mut);padding:8px 20px 28px}
 @media (max-width:420px){main{padding:12px;grid-template-columns:1fr}.metrica b{font-size:17px}}
 """
@@ -195,7 +217,7 @@ function cartao(c){
       <div class="tempo"><p class="secao">Última hora</p>${linhaDoTempo(c)}</div>
       <div><p class="secao">Hoje</p><ul>${incid}</ul></div>
     </div>
-    <div class="rodape"><span>${sessao}</span><span><a href="${esc(c.relatorio)}">Relatório de hoje</a>${c.link ? ` · <a href="${esc(c.link)}" target="_blank" rel="noopener">Abrir live ↗</a>` : ""}</span></div>
+    <div class="rodape"><span>${sessao}</span><span><a href="${esc(c.relatorio)}">Relatório de hoje</a>${c.link ? ` · <a href="${esc(c.link)}" target="_blank" rel="noopener">Abrir live ↗</a>` : ""} · <button class="link" data-editar="${esc(c.nome)}">Editar</button></span></div>
   </article>`;
 }
 
@@ -205,7 +227,8 @@ function desenhar(){
     ["var(--ok)", conta(["ok"]), "no ar"], ["var(--alerta)", conta(["problema", "sem"]), "com problema"],
     ["var(--erro)", conta(["fora_agenda"]), "fora do ar na sessão"], ["var(--neutro)", conta(["fora", "nunca"]), "sem transmissão"],
   ].map(([c, n, t]) => `<span class="pilula"><span class="ponto" style="--c:${c}"></span><b>${n}</b> ${t}</span>`).join("");
-  document.getElementById("canais").innerHTML = dados.canais.map(cartao).join("");
+  document.getElementById("canais").innerHTML = dados.canais.length ? dados.canais.map(cartao).join("")
+    : `<div class="vazio"><p>Nenhum canal cadastrado ainda.</p><button class="primario" data-novo>+ Adicionar canal</button></div>`;
   document.getElementById("hora").textContent = dados.agora;
 }
 
@@ -216,6 +239,79 @@ async function atualizar(){
     document.getElementById("conexao").textContent = "";
   } catch (e) { document.getElementById("conexao").textContent = " · sem conexão com o monitor"; }
 }
+
+// ---------- cadastro de canais ----------
+const DIAS_NOMES = ["seg", "ter", "qua", "qui", "sex", "sab", "dom"];
+const $ = id => document.getElementById(id);
+let editando = null;
+
+function linhaAgenda(a = {dias: ["seg", "ter", "qua", "qui", "sex"], inicio: "09:00", fim: "12:00"}){
+  return `<div class="agenda-linha">
+    <div class="dias">${DIAS_NOMES.map(d => `<label><input type="checkbox" value="${d}" ${a.dias.includes(d) ? "checked" : ""}>${d}</label>`).join("")}</div>
+    <label>das <input type="time" class="ini" value="${a.inicio}" required></label>
+    <label>às <input type="time" class="fim" value="${a.fim}" required></label>
+    <button type="button" class="link" data-tirar aria-label="Remover este horário">remover</button></div>`;
+}
+function abrirForm(c){
+  editando = c ? c.nome : null;
+  $("f-nome").value = c ? c.nome : ""; $("f-url").value = c ? c.url : "";
+  $("form-titulo").textContent = c ? "Editar canal" : "Adicionar canal";
+  $("agenda-linhas").innerHTML = (c ? c.agenda_texto : []).map(linhaAgenda).join("");
+  $("teste").innerHTML = ""; $("form-erro").textContent = "";
+  $("btn-remover").hidden = !c;
+  $("dlg").showModal();
+}
+async function enviar(caminho, corpo){
+  const r = await fetch(caminho, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(corpo)});
+  const j = await r.json().catch(() => ({erro: `erro ${r.status}`}));
+  if (!r.ok) throw new Error(j.erro || `erro ${r.status}`);
+  return j;
+}
+function lerAgenda(){
+  return [...document.querySelectorAll(".agenda-linha")].map(l => ({
+    dias: [...l.querySelectorAll("input[type=checkbox]:checked")].map(i => i.value),
+    inicio: l.querySelector(".ini").value, fim: l.querySelector(".fim").value}));
+}
+document.addEventListener("click", e => {
+  const ed = e.target.closest("[data-editar]");
+  if (ed) abrirForm(dados.canais.find(c => c.nome === ed.dataset.editar));
+  if (e.target.closest("[data-novo]")) abrirForm(null);
+  if (e.target.closest("[data-tirar]")) e.target.closest(".agenda-linha").remove();
+});
+$("mais-horario").addEventListener("click", () => $("agenda-linhas").insertAdjacentHTML("beforeend", linhaAgenda()));
+$("cancelar").addEventListener("click", () => $("dlg").close());
+$("btn-testar").addEventListener("click", async () => {
+  const url = $("f-url").value.trim();
+  if (!url) { $("teste").textContent = "Cole o link primeiro."; return; }
+  $("teste").textContent = "Consultando…";
+  try {
+    const t = await enviar("/api/testar", {url});
+    if (t.url !== url) $("f-url").value = t.url;
+    let html = t.ao_vivo === true ? `🟢 <b>Ao vivo agora</b>${t.titulo ? ` · ${esc(t.titulo)}` : ""}${t.espectadores != null ? ` · ${t.espectadores} assistindo` : ""}`
+      : t.ao_vivo === false ? "⚪ Link certo, mas <b>não está ao vivo agora</b>. O monitor fica de olho e avisa quando entrar."
+      : `⚠️ Não consegui verificar: ${esc(t.erro)}`;
+    if (t.sugestao) html += `<p style="margin:8px 0 0">Esse é o link de <b>um vídeo</b>, que muda a cada transmissão. Para acompanhar sempre a live atual${t.sugestao.nome ? ` de <b>${esc(t.sugestao.nome)}</b>` : ""}, use o link do canal:<br><button type="button" class="link" id="usar-sugestao">${esc(t.sugestao.url)}</button></p>`;
+    $("teste").innerHTML = html;
+    const usar = $("usar-sugestao");
+    if (usar) usar.addEventListener("click", () => { $("f-url").value = t.sugestao.url; if (!$("f-nome").value) $("f-nome").value = t.sugestao.nome; usar.closest("p").remove(); });
+  } catch (err) { $("teste").textContent = "⚠️ " + err.message; }
+});
+$("form-canal").addEventListener("submit", async e => {
+  e.preventDefault();
+  const agenda = lerAgenda();
+  if (agenda.some(a => !a.dias.length)) { $("form-erro").textContent = "Marque pelo menos um dia em cada horário."; return; }
+  try {
+    await enviar("/api/canais/salvar", {original: editando, canal: {nome: $("f-nome").value, url: $("f-url").value, agenda}});
+    $("dlg").close(); atualizar();
+  } catch (err) { $("form-erro").textContent = err.message; }
+});
+$("btn-remover").addEventListener("click", async () => {
+  if (!confirm(`Remover o canal "${editando}"? O histórico continua guardado.`)) return;
+  try { await enviar("/api/canais/remover", {nome: editando}); $("dlg").close(); atualizar(); }
+  catch (err) { $("form-erro").textContent = err.message; }
+});
+["f-nome", "f-url"].forEach(id => $(id).addEventListener("input", () => $("form-erro").textContent = ""));
+
 desenhar();
 setInterval(atualizar, 10000);
 setInterval(() => document.querySelectorAll("[data-segundos]").forEach(b => { if (b.dataset.segundos !== "") b.textContent = haQuanto(+b.dataset.segundos); }), 1000);
@@ -229,8 +325,24 @@ def pagina_status(cfg, banco, agora):
 <title>Monitor de transmissão · {escape(cfg['geral']['cliente'])}</title><style>{ESTILO}</style></head><body>
 <header><div><h1>Monitor de transmissão</h1>
 <div class="sub">{escape(cfg['geral']['cliente'])} · atualizado em <span id="hora"></span><span id="conexao"></span> · <a href="/relatorios">Relatórios</a></div></div>
-<div class="resumo" id="resumo"></div></header>
+<div class="resumo"><span id="resumo" class="resumo"></span><button class="primario" data-novo>+ Adicionar canal</button></div></header>
 <main id="canais"></main>
+<dialog id="dlg" aria-labelledby="form-titulo"><form id="form-canal" novalidate>
+  <h2 id="form-titulo">Adicionar canal</h2>
+  <label class="campo">Nome<input type="text" id="f-nome" maxlength="80" placeholder="Câmara Municipal de Boa Vista" required></label>
+  <label class="campo">Link da transmissão
+    <input type="text" id="f-url" placeholder="https://www.youtube.com/@canal/live" required>
+    <span class="dica">Cole o endereço do canal no YouTube (ex.: youtube.com/@camara). O painel completa com /live, que segue sempre a live atual. Também vale .m3u8, rtmp:// ou "simulado".</span></label>
+  <div><button type="button" id="btn-testar">Testar link</button></div>
+  <div class="teste" id="teste" role="status"></div>
+  <div style="display:grid;gap:8px"><b style="font-size:14px">Horários das sessões <span class="dica">(opcional)</span></b>
+    <span class="dica">Dentro do horário, estar fora do ar é problema ("não começou" ou "caiu"). Sem horários, o monitor só avisa quando a live entra e sai do ar.</span>
+    <div id="agenda-linhas" style="display:grid;gap:8px"></div>
+    <div><button type="button" id="mais-horario">+ Horário</button></div></div>
+  <div class="erro-form" id="form-erro" role="alert"></div>
+  <div class="acoes"><button type="button" class="perigo" id="btn-remover" hidden>Remover canal</button>
+    <div><button type="button" id="cancelar">Cancelar</button><button type="submit" class="primario">Salvar</button></div></div>
+</form></dialog>
 <footer>Verifica cada canal a cada {cfg['geral']['intervalo_segundos']} s · {escape(cfg['geral']['responsavel'])}</footer>
 <script>const DADOS = {dados};{SCRIPT}</script></body></html>"""
 
@@ -249,8 +361,8 @@ def pagina_relatorios(pasta):
 <main><ul>{itens}</ul></main></body></html>"""
 
 
-def criar_servidor(cfg, banco, porta=8095, host="0.0.0.0", pasta_relatorios="/dados/relatorios"):
-    nomes = {c["nome"] for c in cfg["canais"]}
+def criar_servidor(cfg, banco, porta=8095, host="0.0.0.0", pasta_relatorios="/dados/relatorios",
+                   cadastro=None, senha="", consultar=fonte.consultar, sugerir=fonte.sugerir_canal):
     pasta = Path(pasta_relatorios)
 
     class Painel(BaseHTTPRequestHandler):
@@ -263,14 +375,79 @@ def criar_servidor(cfg, banco, porta=8095, host="0.0.0.0", pasta_relatorios="/da
             self.end_headers()
             self.wfile.write(dados)
 
+        def _json(self, codigo, dados):
+            self._enviar(codigo, json.dumps(dados, ensure_ascii=False), "application/json; charset=utf-8")
+
+        def _autorizado(self):
+            """Com PAINEL_SENHA definida, pede usuário e senha (qualquer usuário, essa senha)."""
+            if not senha:
+                return True
+            cabecalho = self.headers.get("Authorization", "")
+            if cabecalho.startswith("Basic "):
+                try:
+                    _, _, informada = base64.b64decode(cabecalho[6:]).decode("utf-8").partition(":")
+                    if hmac.compare_digest(informada.encode(), senha.encode()):
+                        return True
+                except (ValueError, UnicodeDecodeError):
+                    pass
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Monitor de transmissao", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
+        def do_POST(self):
+            if not self._autorizado():
+                return
+            # Só JSON: um formulário de outro site não consegue mandar isso sem permissão (CORS).
+            if not self.headers.get("Content-Type", "").startswith("application/json"):
+                return self._json(415, {"erro": "envie JSON"})
+            tamanho = int(self.headers.get("Content-Length", 0) or 0)
+            if tamanho > 20000:
+                return self._json(413, {"erro": "pedido grande demais"})
+            try:
+                corpo = json.loads(self.rfile.read(tamanho) or b"{}")
+            except ValueError:
+                return self._json(400, {"erro": "JSON inválido"})
+            caminho = urlparse(self.path).path
+            agora = datetime.now().replace(microsecond=0)
+            try:
+                if caminho == "/api/testar":
+                    url = fonte.normalizar_url(str(corpo.get("url") or ""))
+                    if not url:
+                        raise ValueError("cole o link da transmissão")
+                    r = consultar(url, agora)
+                    return self._json(200, {"url": url, "ao_vivo": r["ao_vivo"], "titulo": r["titulo"],
+                                            "espectadores": r["espectadores"], "erro": r["erro"],
+                                            "sugestao": sugerir(url) if fonte.eh_video(url) else None})
+                if cadastro is None:
+                    return self._json(404, {"erro": "cadastro de canais desligado"})
+                if caminho == "/api/canais/salvar":
+                    original = corpo.get("original")
+                    canal = cadastro.salvar(corpo.get("canal") or {}, original)
+                    if original and original != canal["nome"]:
+                        banco.fechar_abertos(original, agora)
+                    return self._json(200, {"ok": True, "canais": cadastro.lista()})
+                if caminho == "/api/canais/remover":
+                    nome = str(corpo.get("nome") or "")
+                    cadastro.remover(nome)
+                    banco.fechar_abertos(nome, agora)
+                    return self._json(200, {"ok": True, "canais": cadastro.lista()})
+            except ValueError as erro:
+                return self._json(400, {"erro": str(erro)})
+            self._json(404, {"erro": "não encontrado"})
+
         def do_GET(self):
+            if not self._autorizado():
+                return
             url = urlparse(self.path)
             agora = datetime.now().replace(microsecond=0)
             if url.path == "/":
                 return self._enviar(200, pagina_status(cfg, banco, agora))
             if url.path == "/api/estado":
-                return self._enviar(200, json.dumps(estado(cfg, banco, agora), ensure_ascii=False),
-                                    "application/json; charset=utf-8")
+                return self._json(200, estado(cfg, banco, agora))
+            if url.path == "/api/canais" and cadastro is not None:
+                return self._json(200, cadastro.lista())
             if url.path == "/relatorios":
                 return self._enviar(200, pagina_relatorios(pasta))
             if url.path.startswith("/relatorios/"):
@@ -282,7 +459,7 @@ def criar_servidor(cfg, banco, porta=8095, host="0.0.0.0", pasta_relatorios="/da
             if url.path == "/relatorio":
                 q = parse_qs(url.query)
                 canal = q.get("canal", [""])[0]
-                if canal not in nomes:
+                if canal not in {c["nome"] for c in cfg["canais"]}:
                     return self._enviar(404, "Canal não encontrado")
                 try:
                     dia = datetime.strptime(q.get("data", [f"{agora:%Y-%m-%d}"])[0], "%Y-%m-%d")

@@ -33,6 +33,30 @@ def _agenda(itens, onde):
     return agenda
 
 
+def validar_canal(dados, nomes_existentes=(), onde="canal"):
+    """Confere e converte um canal ({nome, url, agenda}) vindo do config.toml ou do painel."""
+    from .fonte import normalizar_url
+
+    nome = str(dados.get("nome") or "").strip()
+    url = normalizar_url(str(dados.get("url") or ""))
+    if not nome:
+        raise ValueError(f"{onde}: falta o nome")
+    if len(nome) > 80:
+        raise ValueError(f"{onde}: nome muito longo (máximo 80 letras)")
+    if nome in nomes_existentes:
+        raise ValueError(f"{onde}: já existe um canal chamado '{nome}'")
+    if not url:
+        raise ValueError(f"{onde} ({nome}): falta o link da transmissão")
+    return {"nome": nome, "url": url, "agenda": _agenda(dados.get("agenda") or [], f"canal '{nome}'")}
+
+
+def agenda_para_texto(agenda):
+    """Volta a agenda para o formato do config (para salvar e para o formulário do painel)."""
+    nomes = ["seg", "ter", "qua", "qui", "sex", "sab", "dom"]
+    return [{"dias": [nomes[d] for d in sorted(a["dias"])], "inicio": f"{a['inicio']:%H:%M}",
+             "fim": f"{a['fim']:%H:%M}"} for a in agenda]
+
+
 def janela_atual(agenda, agora):
     """(início, fim) da sessão marcada que inclui 'agora', ou None."""
     for item in agenda:
@@ -66,22 +90,13 @@ def carregar(caminho):
     geral.setdefault("avisar_inicio_e_fim", True)
 
     erros = []
-    nomes = set()
+    canais = []
     for i, canal in enumerate(cfg.get("canais", []), 1):
-        nome = canal.get("nome")
-        if not nome:
-            erros.append(f"canal #{i}: falta 'nome'")
-        elif nome in nomes:
-            erros.append(f"canal #{i}: nome repetido '{nome}'")
-        nomes.add(nome)
-        if not canal.get("url"):
-            erros.append(f"canal #{i} ({nome}): falta 'url'")
         try:
-            canal["agenda"] = _agenda(canal.get("agenda", []), f"canal '{nome}'")
+            canais.append(validar_canal(canal, {c["nome"] for c in canais}, f"canal #{i}"))
         except ValueError as erro:
             erros.append(str(erro))
-    if not cfg.get("canais"):
-        erros.append("nenhum canal em [[canais]]")
+    cfg["canais"] = canais  # pode ficar vazio: os canais também são cadastrados pelo painel
     if erros:
         raise ValueError("Erro no config.toml:\n- " + "\n- ".join(erros))
 

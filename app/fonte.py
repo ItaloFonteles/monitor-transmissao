@@ -6,6 +6,7 @@
   de propósito, para testar e demonstrar os alertas.
 """
 import math
+import re
 from datetime import datetime
 
 DIRETOS = ("rtmp://", "rtmps://", "rtsp://", "srt://", "udp://", "file:", "/")
@@ -15,6 +16,44 @@ CICLO_SIMULADO = [
     (120, "ok"), (60, "preta"), (60, "ok"), (60, "sem_audio"),
     (60, "congelada"), (60, "fora_do_ar"), (60, "ok"),
 ]
+
+
+CANAL_YOUTUBE = re.compile(
+    r"https?://(?:www\.|m\.)?youtube\.com/(@[\w.\-]+|channel/[\w\-]+|c/[\w.\-]+|user/[\w.\-]+)"
+    r"(?:/(?:featured|videos|streams|live))?/?(?:\?.*)?")
+
+
+def normalizar_url(url):
+    """Aceita o canal do jeito que a pessoa colar e devolve o link /live, que sempre
+    aponta para a transmissão atual: '@camara', 'youtube.com/@camara/videos'…"""
+    url = url.strip()
+    if not url or url.startswith(("simulado", "/")) or "://" in url and not url.startswith("http"):
+        return url
+    if url.startswith("@"):
+        url = f"https://www.youtube.com/{url}"
+    elif "://" not in url:
+        url = f"https://{url}"
+    canal = CANAL_YOUTUBE.fullmatch(url)
+    return f"https://www.youtube.com/{canal.group(1)}/live" if canal else url
+
+
+def eh_video(url):
+    """Link de um vídeo específico (muda a cada transmissão), e não do canal."""
+    return bool(re.search(r"youtube\.com/(watch\?|live/[\w\-]{6,})|youtu\.be/", url))
+
+
+def sugerir_canal(url):
+    """Para o link de um vídeo, descobre o link /live do canal dono dele."""
+    import yt_dlp
+
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "logger": _Calado(), "skip_download": True}) as ydl:
+            info = ydl.extract_info(url, download=False, process=False)
+    except Exception:
+        return None
+    canal = info.get("uploader_id") if str(info.get("uploader_id") or "").startswith("@") else (
+        f"channel/{info['channel_id']}" if info.get("channel_id") else None)
+    return {"url": f"https://www.youtube.com/{canal}/live", "nome": (info.get("channel") or "").strip()} if canal else None
 
 
 def cena_simulada(agora):
