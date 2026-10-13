@@ -1,0 +1,5 @@
+.env
+config.toml
+__pycache__/
+*.db
+relatorio-*.html

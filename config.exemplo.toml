@@ -1,0 +1,28 @@
+# Copie para config.toml e ajuste.
+
+[geral]
+cliente = "Câmara Municipal"
+intervalo_segundos = 60          # de quanto em quanto tempo verificar
+amostra_segundos = 10            # quantos segundos de vídeo analisar a cada vez
+falhas_para_alerta = 2           # verificações seguidas com problema antes de avisar
+tolerancia_inicio_minutos = 10   # atraso aceito no começo da sessão antes de avisar
+avisar_inicio_e_fim = true       # avisar quando a transmissão entra e sai do ar
+silencio_db = -50                # abaixo disso é silêncio
+volume_alto_db = -8              # volume médio acima disso é "áudio estourando"
+
+# Live de mentira: cai, fica preta, muda e congela num ciclo de 8 minutos.
+# Serve para testar os alertas e para demonstrar o monitor a um cliente.
+[[canais]]
+nome = "Transmissão simulada"
+url = "simulado"
+
+# Canal real: o link /live do canal do YouTube (fica sempre apontando para a live atual).
+# [[canais]]
+# nome = "Câmara Municipal"
+# url = "https://www.youtube.com/@NOME_DO_CANAL/live"
+# # Sessões marcadas: fora delas, estar fora do ar é normal e não gera alerta.
+# agenda = [
+#   { dias = ["ter", "qua", "qui"], inicio = "09:00", fim = "13:00" },
+# ]
+
+# Também serve um endereço direto: .m3u8, rtmp://, srt:// (ex.: o servidor de transmissão local).

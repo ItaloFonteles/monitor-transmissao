@@ -1,0 +1,19 @@
+# Monitor de Transmissão
+#   docker compose up -d --build
+# Painel: http://localhost:8095
+
+services:
+  monitor:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TZ: America/Boa_Vista
+    volumes:
+      - ./config.toml:/config/config.toml:ro
+      - transmissao_dados:/dados          # histórico (SQLite) e relatórios das sessões
+    ports:
+      - "8095:8095"
+
+volumes:
+  transmissao_dados:
