@@ -18,6 +18,9 @@ Quando o problema some, chega o aviso de **resolvido** com a duração ("✅ sem
 
 **Stack:** Python 3.12 · ffmpeg · yt-dlp · SQLite · Docker. Não precisa de chave de API do YouTube.
 
+![Painel do monitor vigiando duas lives reais do YouTube: audiência, volume, linha do tempo da última hora e problemas do dia](docs/painel.png)
+
+*Painel vigiando duas lives reais do YouTube. Cada cartão mostra a situação, quantos assistem, o medidor de volume, a linha do tempo da última hora e os problemas do dia. Canais e horários se cadastram em "+ Adicionar canal".*
 
 ---
 
